@@ -5,7 +5,7 @@ import { MagnifyingGlassIcon, UserGroupIcon, ChartBarIcon, FolderIcon } from '@h
 
 export default function Apps() {
   return (
-    <Layout title="Applications">
+    <Layout>
       <div className="space-y-6">
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />

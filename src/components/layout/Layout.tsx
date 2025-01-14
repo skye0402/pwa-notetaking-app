@@ -3,13 +3,12 @@ import { Navbar } from './Navbar';
 
 interface LayoutProps {
   children: React.ReactNode;
-  title: string;
 }
 
-export function Layout({ children, title }: LayoutProps) {
+export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header title={title} />
+      <Header />
       <main className="mx-auto max-w-md px-4 pt-20 pb-20">
         {children}
       </main>

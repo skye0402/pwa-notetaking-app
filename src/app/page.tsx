@@ -1,35 +1,61 @@
 'use client';
 
-import { Layout } from '@/components/layout/Layout';
+import { AddNoteModal } from '@/components/notes/AddNoteModal';
 import { NoteCard } from '@/components/notes/NoteCard';
+import { NoteViewModal } from '@/components/notes/NoteViewModal';
 import { useNotesStore } from '@/store/notes';
 import { PlusIcon } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { AddNoteModal } from '@/components/notes/AddNoteModal';
+import { Note } from '@/types/note';
+import { Layout } from '@/components/layout/Layout';
 
 export default function Home() {
-  const { notes, fetchNotes, selectNote } = useNotesStore();
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [selectedNote, setSelectedNote] = useState<Note | undefined>(undefined);
+  const { notes, fetchNotes } = useNotesStore();
 
   useEffect(() => {
     fetchNotes();
   }, [fetchNotes]);
 
+  const handleEdit = (note: Note) => {
+    setSelectedNote(note);
+    setShowAddModal(true);
+  };
+
+  const handleCloseModal = () => {
+    setShowAddModal(false);
+    setSelectedNote(undefined);
+  };
+
+  const handleNoteClick = (note: Note) => {
+    setSelectedNote(note);
+    setShowViewModal(true);
+  };
+
   return (
-    <Layout title="Start">
+    <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">New To Dos</h2>
-          <Button size="sm" onClick={() => setIsAddModalOpen(true)}>
-            <PlusIcon className="mr-1 h-4 w-4" />
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center rounded-lg bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
+          >
+            <PlusIcon className="mr-2 h-5 w-5" />
             Add Note
-          </Button>
+          </button>
         </div>
 
         <div className="space-y-4">
           {notes.map((note) => (
-            <NoteCard key={note.id} note={note} onSelect={selectNote} />
+            <NoteCard
+              key={note.id}
+              note={note}
+              onEdit={handleEdit}
+              onClick={() => handleNoteClick(note)}
+            />
           ))}
           {notes.length === 0 && (
             <p className="text-center text-gray-500">No notes yet. Create your first note!</p>
@@ -64,10 +90,22 @@ export default function Home() {
         </div>
       </div>
 
-      <AddNoteModal 
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+      <AddNoteModal
+        isOpen={showAddModal}
+        onClose={handleCloseModal}
+        editNote={selectedNote}
       />
+
+      {selectedNote && (
+        <NoteViewModal
+          note={selectedNote}
+          isOpen={showViewModal}
+          onClose={() => {
+            setShowViewModal(false);
+            setSelectedNote(undefined);
+          }}
+        />
+      )}
     </Layout>
   );
 }

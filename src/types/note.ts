@@ -1,11 +1,13 @@
+export type SyncStatus = 'pending' | 'synced' | 'failed';
+
 export interface Note {
-  id?: number;
+  id: number;
   title: string;
   content: string;
-  images?: string[];  // Base64 encoded images or URLs
+  images: string[];
   createdAt: Date;
   updatedAt: Date;
-  syncStatus?: 'pending' | 'synced' | 'failed';
+  syncStatus: SyncStatus;
 }
 
 export type CreateNoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus'>;

@@ -16,7 +16,7 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
   const [content, setContent] = useState(editNote?.content || '');
   const [images, setImages] = useState<string[]>(editNote?.images || []);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { createNote, updateNote } = useNotesStore();
+  const { addNote, updateNote } = useNotesStore();
 
   if (!isOpen) return null;
 
@@ -47,14 +47,13 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editNote?.id) {
-      await updateNote({
-        id: editNote.id,
+      await updateNote(editNote.id, {
         title,
         content,
         images,
       });
     } else {
-      await createNote({
+      await addNote({
         title,
         content,
         images,

@@ -33,18 +33,11 @@ async function generateIcons() {
         .toFile(path.join(iconDir, `icon-${size}x${size}.png`));
     }
 
-    // Generate SAP logo
-    const sapSvg = `<?xml version="1.0" encoding="UTF-8"?>
-    <svg width="72" height="36" viewBox="0 0 72 36" version="1.1" xmlns="http://www.w3.org/2000/svg">
-        <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-            <path d="M0,0 L72,0 L72,36 L0,36 L0,0 Z M9,9 L9,27 L18,27 C22.97056,27 27,22.97056 27,18 C27,13.02944 22.97056,9 18,9 L9,9 Z M45,9 L45,27 L54,27 C58.97056,27 63,22.97056 63,18 C63,13.02944 58.97056,9 54,9 L45,9 Z" fill="#000000"/>
-        </g>
-    </svg>`;
-
-    await sharp(Buffer.from(sapSvg))
+    // Generate godrej logo
+    await sharp(path.join(__dirname, '../public/godrej-logo.png'))
       .resize(72, 36)
       .png()
-      .toFile(path.join(__dirname, '../public/sap-logo.png'));
+      .toFile(path.join(__dirname, '../public/godrej-logo.png'));
 
     console.log('Icons generated successfully!');
   } catch (error) {
