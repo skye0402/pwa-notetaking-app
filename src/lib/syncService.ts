@@ -10,6 +10,8 @@ export class SyncService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private baseReconnectDelay = 1000;
+  private lastSyncTime = 0;
+  private lastOperation: { type: string; id?: number; timestamp: number } | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -25,7 +27,6 @@ export class SyncService {
     this.onlineStatus = true;
     this.reconnectAttempts = 0;
     this.setupEventSource();
-    this.syncWithServer();
   };
 
   private handleOffline = () => {
@@ -60,9 +61,47 @@ export class SyncService {
     }
 
     try {
-      // Parse data to validate it's JSON, but we don't need the actual data
-      JSON.parse(event.data);
-      await this.syncWithServer();
+      // Parse data to validate it's JSON
+      const data = JSON.parse(event.data);
+      
+      // Check if this is a response to our own operation
+      if (this.lastOperation) {
+        const timeSinceOperation = Date.now() - this.lastOperation.timestamp;
+        if (timeSinceOperation < 2000) { // Within 2 seconds
+          if (data.length === 1) {
+            const note = data[0];
+            if (note.deleted && this.lastOperation.type === 'delete' && note.id === this.lastOperation.id) {
+              console.log('Ignoring sync for own delete operation');
+              return;
+            }
+            if (!note.deleted && this.lastOperation.type === 'add' && note.id === this.lastOperation.id) {
+              console.log('Ignoring sync for own add operation');
+              return;
+            }
+          }
+        }
+      }
+
+      // Get latest notes from server
+      const response = await fetch('/api/notes');
+      if (!response.ok) {
+        throw new Error('Failed to fetch notes from server');
+      }
+
+      const serverNotes: Note[] = await response.json();
+      console.log('Received server notes:', serverNotes);
+
+      // Update local notes
+      await Promise.all(serverNotes.map(note => 
+        db.notes.put({
+          ...note,
+          createdAt: new Date(note.createdAt),
+          updatedAt: new Date(note.updatedAt),
+          syncStatus: 'synced' as SyncStatus
+        })
+      ));
+
+      this.notifyChange();
     } catch (error) {
       console.error('Error processing message:', error);
     }
@@ -106,105 +145,107 @@ export class SyncService {
     }
   }
 
-  async syncWithServer(): Promise<void> {
-    if (this.syncInProgress || !this.onlineStatus) return;
-
-    console.log('Starting sync');
-    this.syncInProgress = true;
-
-    try {
-      const localNotes = await db.notes.toArray();
-      const pendingNotes = localNotes.filter(note => note.id && note.syncStatus === 'pending').map(ensureNoteId);
-
-      // First, sync pending notes
-      if (pendingNotes.length > 0) {
-        console.log('Syncing pending notes:', pendingNotes);
-        const response = await fetch('/api/notes/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(pendingNotes),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to sync pending notes');
-        }
-
-        // Mark synced notes
-        for (const note of pendingNotes) {
-          await db.notes.update(note.id, { syncStatus: 'synced' as SyncStatus });
-        }
-      }
-
-      // Then get all notes from server
-      const response = await fetch('/api/notes');
-      if (!response.ok) {
-        throw new Error('Failed to fetch notes from server');
-      }
-
-      const serverNotes: Note[] = await response.json();
-      console.log('Received server notes:', serverNotes);
-
-      // Update local notes
-      for (const serverNote of serverNotes) {
-        const localNote = localNotes.find(note => note.id === serverNote.id);
-        if (!localNote || localNote.syncStatus !== 'pending') {
-          await db.notes.put({
-            ...serverNote,
-            createdAt: new Date(serverNote.createdAt),
-            updatedAt: new Date(serverNote.updatedAt),
-            syncStatus: 'synced' as SyncStatus
-          });
-        }
-      }
-
-      // Delete notes that don't exist on server (unless pending)
-      const serverNoteIds = new Set(serverNotes.map(note => note.id));
-      for (const localNote of localNotes) {
-        const note = ensureNoteId(localNote);
-        if (!serverNoteIds.has(note.id) && note.syncStatus !== 'pending') {
-          await db.notes.delete(note.id);
-        }
-      }
-
-      this.notifyChange();
-    } catch (error) {
-      console.error('Error during sync:', error);
-    } finally {
-      this.syncInProgress = false;
-      console.log('Sync completed');
-    }
-  }
-
   async addNote(noteInput: CreateNoteInput): Promise<Note> {
-    const id = await db.notes.add({
-      ...noteInput,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      syncStatus: 'pending' as SyncStatus,
-    });
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(noteInput),
+      });
 
-    const note = await db.notes.get(id);
-    if (!note) {
-      throw new Error('Failed to create note');
+      if (!response.ok) {
+        throw new Error('Failed to add note to server');
+      }
+
+      const serverNote = await response.json();
+      await db.notes.put({
+        ...serverNote,
+        createdAt: new Date(serverNote.createdAt),
+        updatedAt: new Date(serverNote.updatedAt),
+        syncStatus: 'synced' as SyncStatus
+      });
+
+      // Record this operation
+      this.lastOperation = { type: 'add', id: serverNote.id, timestamp: Date.now() };
+
+      // Notify other clients about the new note
+      await fetch('/api/notes/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([serverNote]),
+      });
+
+      return serverNote;
+    } catch (error) {
+      console.error('Error adding note:', error);
+      throw error;
     }
-
-    this.syncWithServer();
-    return ensureNoteId(note);
   }
 
   async updateNote(id: number, noteInput: Partial<CreateNoteInput>): Promise<void> {
-    await db.notes.update(id, {
-      ...noteInput,
-      updatedAt: new Date(),
-      syncStatus: 'pending' as SyncStatus,
-    });
+    try {
+      const response = await fetch(`/api/notes/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(noteInput),
+      });
 
-    this.syncWithServer();
+      if (!response.ok) {
+        throw new Error('Failed to update note on server');
+      }
+
+      const serverNote = await response.json();
+      await db.notes.put({
+        ...serverNote,
+        createdAt: new Date(serverNote.createdAt),
+        updatedAt: new Date(serverNote.updatedAt),
+        syncStatus: 'synced' as SyncStatus
+      });
+
+      // Record this operation
+      this.lastOperation = { type: 'update', id, timestamp: Date.now() };
+
+      // Notify other clients about the change
+      await fetch('/api/notes/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([serverNote]),
+      });
+
+      this.notifyChange();
+    } catch (error) {
+      console.error('Error updating note:', error);
+    }
   }
 
   async deleteNote(id: number): Promise<void> {
-    await db.notes.delete(id);
-    this.syncWithServer();
+    try {
+      // Delete from server first
+      const response = await fetch(`/api/notes/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete note from server');
+      }
+
+      // Then delete locally
+      await db.notes.delete(id);
+
+      // Record this operation
+      this.lastOperation = { type: 'delete', id, timestamp: Date.now() };
+
+      // Notify other clients about the deletion
+      await fetch('/api/notes/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ id, deleted: true }]),
+      });
+
+      this.notifyChange();
+    } catch (error) {
+      console.error('Error deleting note:', error);
+    }
   }
 }
 

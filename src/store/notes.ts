@@ -37,7 +37,32 @@ export const useNotesStore = create<NotesState>((set) => {
       console.log('Fetching notes from store');
       set({ loading: true });
       try {
-        // Get initial notes from IndexedDB
+        // Get notes from server
+        const response = await fetch('/api/notes');
+        if (response.ok) {
+          const serverNotes: Note[] = await response.json();
+          console.log('Got notes from server:', serverNotes);
+          
+          // Update IndexedDB with server notes
+          await Promise.all(serverNotes.map(note => 
+            db.notes.put({
+              ...note,
+              createdAt: new Date(note.createdAt),
+              updatedAt: new Date(note.updatedAt),
+              syncStatus: 'synced'
+            })
+          ));
+
+          set({ 
+            notes: serverNotes.sort((a, b) => 
+              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+            ),
+            loading: false
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching notes:', error);
+        // Fallback to local notes if server fetch fails
         const dbNotes = await db.notes.toArray();
         const notes = dbNotes.map(note => ({
           ...ensureNoteId(note),
@@ -45,25 +70,22 @@ export const useNotesStore = create<NotesState>((set) => {
           updatedAt: new Date(note.updatedAt)
         }));
         set({ 
-          notes: notes.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()) 
+          notes: notes.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()),
+          loading: false
         });
-      } catch (error) {
-        console.error('Error fetching notes:', error);
-      } finally {
-        set({ loading: false });
       }
     },
 
     addNote: async (noteInput: CreateNoteInput) => {
       const note = await syncService.addNote(noteInput);
       set(state => ({
-        notes: [note, ...state.notes].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+        notes: [note, ...state.notes]
       }));
     },
 
     updateNote: async (id: number, noteInput: Partial<CreateNoteInput>) => {
       await syncService.updateNote(id, noteInput);
-      // Note: The sync callback will update the store
+      // Let the sync callback handle the store update
     },
 
     deleteNote: async (id: number) => {
@@ -71,6 +93,6 @@ export const useNotesStore = create<NotesState>((set) => {
       set(state => ({
         notes: state.notes.filter(note => note.id !== id)
       }));
-    }
+    },
   };
 });
