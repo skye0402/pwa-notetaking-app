@@ -1,4 +1,4 @@
-import { db, ensureNoteId } from './db';
+import { db } from './db';
 import { Note, CreateNoteInput, SyncStatus } from '@/types/note';
 
 export class SyncService {
@@ -27,6 +27,7 @@ export class SyncService {
     this.onlineStatus = true;
     this.reconnectAttempts = 0;
     this.setupEventSource();
+    this.syncPendingNotes(); // Try to sync pending notes when we come online
   };
 
   private handleOffline = () => {
@@ -82,7 +83,15 @@ export class SyncService {
         }
       }
 
-      // Get latest notes from server
+      // If it's a delete operation, just delete the note locally
+      if (data.length === 1 && data[0].deleted) {
+        const noteId = data[0].id;
+        await db.notes.delete(noteId);
+        this.notifyChange();
+        return;
+      }
+
+      // Otherwise get latest notes from server
       const response = await fetch('/api/notes');
       if (!response.ok) {
         throw new Error('Failed to fetch notes from server');
@@ -146,39 +155,121 @@ export class SyncService {
   }
 
   async addNote(noteInput: CreateNoteInput): Promise<Note> {
-    try {
-      const response = await fetch('/api/notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(noteInput),
-      });
+    // Create a new note object with a temporary ID and sync status
+    const tempNote: Note = {
+      ...noteInput,
+      id: Date.now(), // Use timestamp as temporary ID
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      syncStatus: 'pending' as SyncStatus
+    };
 
-      if (!response.ok) {
-        throw new Error('Failed to add note to server');
+    try {
+      // Always save to IndexedDB first
+      await db.notes.put(tempNote);
+      
+      // If we're offline, return the temporary note
+      if (!this.onlineStatus) {
+        console.log('Offline: Saved note locally, will sync later');
+        this.notifyChange();
+        return tempNote;
       }
 
-      const serverNote = await response.json();
-      await db.notes.put({
-        ...serverNote,
-        createdAt: new Date(serverNote.createdAt),
-        updatedAt: new Date(serverNote.updatedAt),
-        syncStatus: 'synced' as SyncStatus
-      });
+      // If we're online, try to sync with the server
+      try {
+        const response = await fetch('/api/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(noteInput),
+        });
 
-      // Record this operation
-      this.lastOperation = { type: 'add', id: serverNote.id, timestamp: Date.now() };
+        if (!response.ok) {
+          throw new Error('Failed to add note to server');
+        }
 
-      // Notify other clients about the new note
-      await fetch('/api/notes/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([serverNote]),
-      });
+        const serverNote = await response.json();
+        
+        // Update the local note with the server response
+        await db.notes.delete(tempNote.id);
+        await db.notes.put({
+          ...serverNote,
+          createdAt: new Date(serverNote.createdAt),
+          updatedAt: new Date(serverNote.updatedAt),
+          syncStatus: 'synced' as SyncStatus
+        });
 
-      return serverNote;
+        // Record this operation
+        this.lastOperation = { type: 'add', id: serverNote.id, timestamp: Date.now() };
+
+        // Notify other clients about the new note
+        await fetch('/api/notes/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([serverNote]),
+        });
+
+        this.notifyChange();
+        return serverNote;
+      } catch (error) {
+        console.error('Error syncing note with server:', error);
+        // Keep the local note with pending status
+        this.notifyChange();
+        return tempNote;
+      }
     } catch (error) {
       console.error('Error adding note:', error);
       throw error;
+    }
+  }
+
+  private async syncPendingNotes() {
+    if (!this.onlineStatus || this.syncInProgress) return;
+
+    this.syncInProgress = true;
+    try {
+      // Get all pending notes
+      const pendingNotes = await db.notes
+        .where('syncStatus')
+        .equals('pending')
+        .toArray();
+
+      for (const note of pendingNotes) {
+        try {
+          const { id, createdAt, updatedAt, syncStatus, ...noteInput } = note;
+          const response = await fetch('/api/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(noteInput),
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to sync note with server');
+          }
+
+          const serverNote = await response.json();
+          
+          // Update local note with server data
+          await db.notes.delete(note.id);
+          await db.notes.put({
+            ...serverNote,
+            createdAt: new Date(serverNote.createdAt),
+            updatedAt: new Date(serverNote.updatedAt),
+            syncStatus: 'synced' as SyncStatus
+          });
+
+          // Notify other clients
+          await fetch('/api/notes/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify([serverNote]),
+          });
+        } catch (error) {
+          console.error(`Error syncing note ${note.id}:`, error);
+        }
+      }
+    } finally {
+      this.syncInProgress = false;
+      this.notifyChange();
     }
   }
 
@@ -242,9 +333,17 @@ export class SyncService {
         body: JSON.stringify([{ id, deleted: true }]),
       });
 
+      // Make sure to update the local store
       this.notifyChange();
     } catch (error) {
       console.error('Error deleting note:', error);
+      // If server deletion fails, revert the local deletion
+      const note = await db.notes.get(id);
+      if (note) {
+        await db.notes.put({ ...note, syncStatus: 'pending' as SyncStatus });
+        this.notifyChange();
+      }
+      throw error;
     }
   }
 }

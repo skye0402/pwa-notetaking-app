@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { XMarkIcon, PhotoIcon, CameraIcon } from '@heroicons/react/24/outline';
 import { useNotesStore } from '@/store/notes';
 import Image from 'next/image';
 import { Note } from '@/types/note';
+import { SpeechToText } from '../SpeechToText';
 
 interface AddNoteModalProps {
   isOpen: boolean;
@@ -12,11 +13,23 @@ interface AddNoteModalProps {
 }
 
 export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
-  const [title, setTitle] = useState(editNote?.title || '');
-  const [content, setContent] = useState(editNote?.content || '');
-  const [images, setImages] = useState<string[]>(editNote?.images || []);
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [images, setImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { addNote, updateNote } = useNotesStore();
+
+  useEffect(() => {
+    if (editNote) {
+      setTitle(editNote.title);
+      setContent(editNote.content);
+      setImages(editNote.images);
+    } else {
+      setTitle('');
+      setContent('');
+      setImages([]);
+    }
+  }, [editNote]);
 
   if (!isOpen) return null;
 
@@ -122,14 +135,26 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
             <label htmlFor="content" className="block text-sm font-medium text-gray-700">
               Content
             </label>
-            <textarea
-              id="content"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={4}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              required
-            />
+            <div className="flex flex-col gap-2">
+              <textarea
+                id="content"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={4}
+                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                required
+              />
+              <SpeechToText
+                onTranscript={(text) => {
+                  console.log('Received transcript in AddNoteModal:', text);
+                  setContent((prev) => {
+                    const newContent = prev ? `${prev}\n${text}` : text;
+                    console.log('Updated content:', newContent);
+                    return newContent;
+                  });
+                }}
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Images</label>
