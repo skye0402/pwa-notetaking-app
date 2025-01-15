@@ -7,17 +7,19 @@ interface SpeechToTextProps {
 }
 
 interface SpeechRecognitionResult {
-  transcript: string;
   isFinal: boolean;
-  item(index: number): { transcript: string; confidence: number };
+  [index: number]: { transcript: string; confidence: number };
+  length: number;
 }
 
 interface SpeechRecognitionResultList {
+  [index: number]: SpeechRecognitionResult;
   length: number;
   item(index: number): SpeechRecognitionResult;
 }
 
 interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
   results: SpeechRecognitionResultList;
 }
 
@@ -38,7 +40,7 @@ interface SpeechRecognition extends EventTarget {
 }
 
 interface SpeechRecognitionConstructor {
-  new (): SpeechRecognition;
+  new(): SpeechRecognition;
 }
 
 declare global {
@@ -52,6 +54,7 @@ export function SpeechToText({ onTranscript }: SpeechToTextProps) {
   const [isListening, setIsListening] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const finalTranscriptRef = useRef<string>('');
 
   const startListening = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -68,31 +71,32 @@ export function SpeechToText({ onTranscript }: SpeechToTextProps) {
 
     recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
       console.log('Speech recognition result received:', event.results);
-      const results = event.results;
-      const lastResult = results.item(results.length - 1);
-      console.log('Last result:', lastResult);
-      
-      if (!lastResult) {
-        console.log('No results found');
-        return;
-      }
+      const results = Array.from({ length: event.results.length }, (_, i) => event.results[i]);
+      let finalTranscript = '';
+      let interimTranscript = '';
 
-      const firstAlternative = lastResult.item(0);
-      if (!firstAlternative) {
-        console.log('No alternatives found');
-        return;
-      }
-
-      const transcript = firstAlternative.transcript;
-      console.log('Current transcript:', transcript);
-      setCurrentTranscript(transcript);
-
-      if (lastResult.isFinal) {
-        console.log('Final transcript:', transcript);
-        if (transcript && transcript.trim()) {
-          onTranscript(transcript);
+      for (let i = event.resultIndex; i < results.length; i++) {
+        const result = results[i];
+        const transcript = result[0].transcript;
+        
+        if (result.isFinal) {
+          finalTranscript += transcript;
+          finalTranscriptRef.current = finalTranscript;
+        } else {
+          interimTranscript += transcript;
         }
-        setCurrentTranscript('');
+      }
+
+      // Only update if we have new content
+      const newTranscript = finalTranscript || interimTranscript;
+      if (newTranscript && newTranscript !== currentTranscript) {
+        console.log('Current transcript:', newTranscript);
+        setCurrentTranscript(newTranscript);
+        
+        if (finalTranscript) {
+          console.log('Final transcript:', finalTranscript);
+          onTranscript(finalTranscript);
+        }
       }
     };
 

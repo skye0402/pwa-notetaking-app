@@ -235,6 +235,8 @@ export class SyncService {
 
       for (const note of pendingNotes) {
         try {
+          // These properties are intentionally destructured but not used
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { id, createdAt, updatedAt, syncStatus, ...noteInput } = note;
           const response = await fetch('/api/notes', {
             method: 'POST',

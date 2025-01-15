@@ -5,6 +5,7 @@ import { useNotesStore } from '@/store/notes';
 import Image from 'next/image';
 import { Note } from '@/types/note';
 import { SpeechToText } from '../SpeechToText';
+import { CameraPreview } from '../camera/CameraPreview';
 
 interface AddNoteModalProps {
   isOpen: boolean;
@@ -16,7 +17,9 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [showCamera, setShowCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const { addNote, updateNote } = useNotesStore();
 
   useEffect(() => {
@@ -30,6 +33,30 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
       setImages([]);
     }
   }, [editNote]);
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape);
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -83,29 +110,16 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
   };
 
   const handleCameraCapture = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      await video.play();
+    setShowCamera(true);
+  };
 
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext('2d')?.drawImage(video, 0, 0);
-
-      const imageDataUrl = canvas.toDataURL('image/jpeg');
-      setImages([...images, imageDataUrl]);
-
-      stream.getTracks().forEach(track => track.stop());
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-    }
+  const handleCameraImage = (imageDataUrl: string) => {
+    setImages([...images, imageDataUrl]);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg bg-white p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div ref={modalRef} className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold">
             {editNote ? 'Edit Note' : 'Add New Note'}
@@ -205,6 +219,12 @@ export function AddNoteModal({ isOpen, onClose, editNote }: AddNoteModalProps) {
               />
             </div>
           </div>
+          {showCamera && (
+            <CameraPreview
+              onCapture={handleCameraImage}
+              onClose={() => setShowCamera(false)}
+            />
+          )}
           <div className="flex justify-end space-x-3">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel

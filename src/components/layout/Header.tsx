@@ -17,10 +17,10 @@ export function Header() {
         <div className="flex h-full items-center justify-start w-2/3">
           <div className="flex h-full w-full items-center py-2">
             <Image
-              src="/godrej-logo.png"
+              src="/godrej-logo-color.png"
               alt="Godrej Logo"
-              width={200}
-              height={40}
+              width={220}
+              height={60}
               className="h-full w-auto object-contain"
               priority
               unoptimized // Disable image optimization to ensure direct loading

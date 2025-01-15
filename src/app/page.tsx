@@ -38,7 +38,7 @@ export default function Home() {
     <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">New To Dos</h2>
+          <h1 className="text-2xl font-bold">My Notes</h1>
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center rounded-lg bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
