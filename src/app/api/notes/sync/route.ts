@@ -17,7 +17,11 @@ export async function GET(request: NextRequest) {
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(message)}\n\n`));
           } catch (error) {
-            console.log('Stream controller is closed, unsubscribing', error);
+            if (error instanceof Error && error.name === 'TypeError' && error.message.includes('Controller is already closed')) {
+              console.log('Stream controller is closed, unsubscribing');
+            } else {
+              console.error('Error enqueueing message:', error);
+            }
             unsubscribe();
           }
         });

@@ -56,6 +56,15 @@ export function SpeechToText({ onTranscript }: SpeechToTextProps) {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const finalTranscriptRef = useRef<string>('');
 
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      finalTranscriptRef.current = '';
+      setCurrentTranscript('');
+    }
+  }, []);
+
   const startListening = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -71,39 +80,43 @@ export function SpeechToText({ onTranscript }: SpeechToTextProps) {
 
     recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
       console.log('Speech recognition result received:', event.results);
-      const results = Array.from({ length: event.results.length }, (_, i) => event.results[i]);
-      let finalTranscript = '';
       let interimTranscript = '';
 
-      for (let i = event.resultIndex; i < results.length; i++) {
-        const result = results[i];
-        const transcript = result[0].transcript;
+      // Get the latest result
+      const latestResult = event.results[event.results.length - 1];
+      const transcript = latestResult[0].transcript.trim();
         
-        if (result.isFinal) {
-          finalTranscript += transcript;
-          finalTranscriptRef.current = finalTranscript;
-        } else {
-          interimTranscript += transcript;
-        }
-      }
-
-      // Only update if we have new content
-      const newTranscript = finalTranscript || interimTranscript;
-      if (newTranscript && newTranscript !== currentTranscript) {
-        console.log('Current transcript:', newTranscript);
-        setCurrentTranscript(newTranscript);
-        
-        if (finalTranscript) {
-          console.log('Final transcript:', finalTranscript);
-          onTranscript(finalTranscript);
-        }
+      if (latestResult.isFinal) {
+        // When the sentence is final, replace the entire transcript
+        finalTranscriptRef.current = transcript;
+        onTranscript(transcript);
+        setCurrentTranscript('');
+      } else {
+        // For interim results, show them as current transcript
+        interimTranscript = transcript;
+        setCurrentTranscript(interimTranscript);
       }
     };
 
     recognitionInstance.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error);
-      setIsListening(false);
-      setCurrentTranscript('');
+      if (event.error === 'no-speech') {
+        // Restart recognition on no-speech error
+        stopListening();
+        setTimeout(startListening, 100);
+      } else {
+        stopListening();
+      }
+    };
+
+    recognitionInstance.onend = () => {
+      console.log('Speech recognition ended');
+      if (isListening) {
+        // Automatically restart if we're still supposed to be listening
+        recognitionInstance.start();
+      } else {
+        setIsListening(false);
+      }
     };
 
     recognitionInstance.onstart = () => {
@@ -111,43 +124,13 @@ export function SpeechToText({ onTranscript }: SpeechToTextProps) {
       setIsListening(true);
     };
 
-    recognitionInstance.onend = () => {
-      console.log('Speech recognition ended');
-      setIsListening(false);
-      
-      // If we still have a current transcript when recognition ends,
-      // send it as final
-      if (currentTranscript && currentTranscript.trim()) {
-        console.log('Sending final transcript on end:', currentTranscript);
-        onTranscript(currentTranscript);
-      }
-      setCurrentTranscript('');
-    };
-
     recognitionRef.current = recognitionInstance;
     try {
       recognitionInstance.start();
     } catch (error) {
       console.error('Error starting speech recognition:', error);
-      alert('Error starting speech recognition. Please try again.');
     }
-  }, [onTranscript, currentTranscript]);
-
-  const stopListening = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      setCurrentTranscript('');
-    }
-  }, []);
-
-  const toggleListening = useCallback(() => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
-  }, [isListening, startListening, stopListening]);
+  }, [currentTranscript, isListening, onTranscript, stopListening]);
 
   useEffect(() => {
     return () => {
@@ -158,29 +141,17 @@ export function SpeechToText({ onTranscript }: SpeechToTextProps) {
   }, []);
 
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className="flex flex-col gap-2">
       <Button
-        onClick={toggleListening}
-        variant="primary"
-        size="sm"
-        className={`flex items-center gap-2 ${isListening ? 'bg-red-500 hover:bg-red-600' : ''}`}
+        type="button"
+        variant={isListening ? "secondary" : "primary"}
+        onClick={isListening ? stopListening : startListening}
       >
-        {isListening ? (
-          <>
-            <MicOff className="h-4 w-4" />
-            Stop Recording
-          </>
-        ) : (
-          <>
-            <Mic className="h-4 w-4" />
-            Start Recording
-          </>
-        )}
+        {isListening ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+        {isListening ? 'Stop Recording' : 'Start Recording'}
       </Button>
       {currentTranscript && (
-        <div className="text-sm text-gray-500 italic">
-          Recording: {currentTranscript}
-        </div>
+        <p className="text-sm text-gray-500">{currentTranscript}</p>
       )}
     </div>
   );

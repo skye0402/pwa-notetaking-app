@@ -38,12 +38,13 @@ class ServerBroadcastService {
 
       // Try to notify each listener
       typeListeners.forEach(listener => {
+        if (!this.activeConnections.has(listener)) {
+          deadConnections.add(listener);
+          return;
+        }
+
         try {
-          if (this.activeConnections.has(listener)) {
-            listener({ type, data });
-          } else {
-            deadConnections.add(listener);
-          }
+          listener({ type, data });
         } catch (error) {
           console.error('Error notifying listener:', error);
           deadConnections.add(listener);
